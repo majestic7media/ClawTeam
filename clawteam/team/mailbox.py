@@ -116,6 +116,15 @@ class MailboxManager:
         data = msg.model_dump_json(indent=2, by_alias=True, exclude_none=True).encode("utf-8")
         self._transport.deliver(delivery_target, data)
         self._log_event(msg)
+        try:
+            from clawteam.events.global_bus import get_event_bus
+            from clawteam.events.types import BeforeInboxSend
+            get_event_bus().emit_async(BeforeInboxSend(
+                team_name=self.team_name, from_agent=from_agent,
+                to=to, msg_type=msg_type.value,
+            ))
+        except Exception:
+            pass
         return msg
 
     def broadcast(
@@ -182,9 +191,20 @@ class MailboxManager:
         """
         claim_messages = getattr(self._transport, "claim_messages", None)
         if callable(claim_messages):
-            return self._parse_claimed_messages(claim_messages(agent_name, limit))
-        raw = self._transport.fetch(agent_name, limit=limit, consume=True)
-        return self._parse_messages(raw)
+            msgs = self._parse_claimed_messages(claim_messages(agent_name, limit))
+        else:
+            raw = self._transport.fetch(agent_name, limit=limit, consume=True)
+            msgs = self._parse_messages(raw)
+        if msgs:
+            try:
+                from clawteam.events.global_bus import get_event_bus
+                from clawteam.events.types import AfterInboxReceive
+                get_event_bus().emit_async(AfterInboxReceive(
+                    team_name=self.team_name, agent_name=agent_name, count=len(msgs),
+                ))
+            except Exception:
+                pass
+        return msgs
 
     def peek(self, agent_name: str) -> list[TeamMessage]:
         """Return pending messages without consuming them."""

@@ -122,7 +122,7 @@ def test_subprocess_backend_discards_output_and_preserves_exit_hook_and_registry
 
 def test_tmux_backend_exports_spawn_path_for_agent_commands(monkeypatch, tmp_path):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    monkeypatch.setenv("CLAWTEAM_DATA_DIR", "/tmp/clawteam-data")
+    monkeypatch.setenv("CLAWTEAM_DATA_DIR", "/tmp/oh-data")
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "demo-project")
     monkeypatch.setenv("PROGRAMFILES(X86)", "should-not-be-exported")
     clawteam_bin = tmp_path / "venv" / "bin" / "clawteam"
@@ -190,11 +190,14 @@ def test_tmux_backend_exports_spawn_path_for_agent_commands(monkeypatch, tmp_pat
     full_cmd = new_session[-1]
     assert f"export PATH={clawteam_bin.parent}:/usr/bin:/bin" in full_cmd
     assert f"export CLAWTEAM_BIN={clawteam_bin}" in full_cmd
-    assert "export CLAWTEAM_DATA_DIR=/tmp/clawteam-data" in full_cmd
+    assert "export CLAWTEAM_DATA_DIR=/tmp/oh-data" in full_cmd
     assert "export GOOGLE_CLOUD_PROJECT=demo-project" in full_cmd
     assert "cd /tmp/demo &&" in full_cmd
     assert "PROGRAMFILES(X86)" not in full_cmd
-    assert f"{clawteam_bin} lifecycle on-exit --team demo-team --agent worker1" in full_cmd
+    # Exit hook is now set via tmux set-hook (not inline in command string)
+    set_hook_calls = [c for c in run_calls if c[:2] == ["tmux", "set-hook"]]
+    assert any("pane-exited" in c for c in set_hook_calls), "pane-exited hook not set"
+    assert any("pane-died" in c for c in set_hook_calls), "pane-died hook not set"
 
 
 def test_tmux_backend_uses_configured_timeout_for_workspace_trust_prompt(monkeypatch, tmp_path):
@@ -391,7 +394,7 @@ def test_tmux_backend_normalizes_bare_nanobot_to_agent(monkeypatch, tmp_path):
 
     new_session = next(call for call in run_calls if call[:3] == ["tmux", "new-session", "-d"])
     full_cmd = new_session[-1]
-    assert " nanobot agent -w /tmp/demo -m 'do work';" in full_cmd
+    assert " nanobot agent -w /tmp/demo -m 'do work'" in full_cmd
 
 
 def test_tmux_backend_confirms_claude_workspace_trust_prompt(monkeypatch):
@@ -692,7 +695,7 @@ def test_tmux_backend_gemini_skip_permissions_and_prompt(monkeypatch, tmp_path):
 
     new_session = next(call for call in run_calls if call[:3] == ["tmux", "new-session", "-d"])
     full_cmd = new_session[-1]
-    assert " gemini --yolo -p 'analyze this repo';" in full_cmd
+    assert " gemini --yolo -p 'analyze this repo'" in full_cmd
 
 
 def test_subprocess_backend_gemini_skip_permissions_and_prompt(monkeypatch, tmp_path):
@@ -811,7 +814,7 @@ def test_tmux_backend_kimi_skip_permissions_workspace_and_prompt(monkeypatch, tm
 
     new_session = next(call for call in run_calls if call[:3] == ["tmux", "new-session", "-d"])
     full_cmd = new_session[-1]
-    assert " kimi --yolo -w /tmp/demo --print -p 'fix the bug';" in full_cmd
+    assert " kimi --yolo -w /tmp/demo --print -p 'fix the bug'" in full_cmd
 
 
 def test_subprocess_backend_kimi_skip_permissions_workspace_and_prompt(monkeypatch, tmp_path):
@@ -851,7 +854,7 @@ def test_subprocess_backend_kimi_skip_permissions_workspace_and_prompt(monkeypat
 
 
 def test_resolve_clawteam_executable_ignores_unrelated_argv0(monkeypatch, tmp_path):
-    unrelated = tmp_path / "not-clawteam-review"
+    unrelated = tmp_path / "not-oh-review"
     unrelated.write_text("#!/bin/sh\n")
     resolved_bin = tmp_path / "bin" / "clawteam"
     resolved_bin.parent.mkdir(parents=True)
@@ -1245,7 +1248,7 @@ def test_tmux_backend_qwen_skip_permissions_and_prompt(monkeypatch, tmp_path):
     assert "spawned" in result
     new_session = next(c for c in run_calls if c[:3] == ["tmux", "new-session", "-d"])
     full_cmd = new_session[-1]
-    assert " qwen --yolo -p 'refactor this';" in full_cmd
+    assert " qwen --yolo -p 'refactor this'" in full_cmd
 
 
 def test_tmux_backend_opencode_skip_permissions_and_prompt(monkeypatch, tmp_path):
@@ -1266,7 +1269,7 @@ def test_tmux_backend_opencode_skip_permissions_and_prompt(monkeypatch, tmp_path
     assert "spawned" in result
     new_session = next(c for c in run_calls if c[:3] == ["tmux", "new-session", "-d"])
     full_cmd = new_session[-1]
-    assert " opencode --yolo -p 'fix the bug';" in full_cmd
+    assert " opencode --yolo -p 'fix the bug'" in full_cmd
 
 
 def test_subprocess_backend_qwen_skip_permissions_and_prompt(monkeypatch, tmp_path):

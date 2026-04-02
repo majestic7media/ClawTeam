@@ -32,7 +32,7 @@ _SHELL_ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 class TmuxBackend(SpawnBackend):
     """Spawn agents in tmux windows for visual monitoring.
 
-    Each agent gets its own tmux window in a session named ``clawteam-{team}``.
+    Each agent gets its own tmux window in a session named ``oh-{team}``.
     Agents run in interactive mode so their work is visible in the tmux pane.
     """
 
@@ -109,19 +109,14 @@ class TmuxBackend(SpawnBackend):
         export_str = "; ".join(f"export {k}={shlex.quote(v)}" for k, v in export_vars.items())
 
         cmd_str = " ".join(shlex.quote(c) for c in final_command)
-        # Append on-exit hook: runs immediately when agent process exits
         exit_cmd = shlex.quote(clawteam_bin) if os.path.isabs(clawteam_bin) else "clawteam"
-        exit_hook = (
-            f"{exit_cmd} lifecycle on-exit --team {shlex.quote(team_name)} "
-            f"--agent {shlex.quote(agent_name)}"
-        )
         # Unset Claude nesting-detection env vars so spawned claude agents
         # don't refuse to start when the leader is itself a claude session.
         unset_clause = "unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION 2>/dev/null; "
         if cwd:
-            full_cmd = f"{unset_clause}{export_str}; cd {shlex.quote(cwd)} && {cmd_str}; {exit_hook}"
+            full_cmd = f"{unset_clause}{export_str}; cd {shlex.quote(cwd)} && {cmd_str}"
         else:
-            full_cmd = f"{unset_clause}{export_str}; {cmd_str}; {exit_hook}"
+            full_cmd = f"{unset_clause}{export_str}; {cmd_str}"
 
         # Check if tmux session exists
         check = subprocess.run(
@@ -149,6 +144,26 @@ class TmuxBackend(SpawnBackend):
             stderr = launch.stderr.decode() if isinstance(launch.stderr, bytes) else launch.stderr
             return f"Error: failed to launch tmux session: {(stderr or '').strip()}"
 
+        # Set tmux native hooks for reliable lifecycle management
+        _exit_hook_cmd = (
+            f"{exit_cmd} lifecycle on-exit --team {shlex.quote(team_name)} "
+            f"--agent {shlex.quote(agent_name)}"
+        )
+        _crash_hook_cmd = (
+            f"{exit_cmd} lifecycle on-crash --team {shlex.quote(team_name)} "
+            f"--agent {shlex.quote(agent_name)}"
+        )
+        subprocess.run(
+            ["tmux", "set-hook", "-t", target, "pane-exited",
+             f"run-shell '{_exit_hook_cmd}'"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        subprocess.run(
+            ["tmux", "set-hook", "-t", target, "pane-died",
+             f"run-shell '{_crash_hook_cmd}'"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
         from clawteam.config import load_config
 
         cfg = load_config()
@@ -161,7 +176,7 @@ class TmuxBackend(SpawnBackend):
             return (
                 f"Error: tmux pane for '{normalized_command[0]}' did not become visible "
                 f"within {pane_ready_timeout:.1f}s. Verify the CLI works standalone before "
-                "using it with clawteam spawn."
+                "using it with oh spawn."
             )
 
         _confirm_workspace_trust_if_prompted(
@@ -231,6 +246,20 @@ class TmuxBackend(SpawnBackend):
             pid=pane_pid,
             command=list(final_command),
         )
+
+        # Emit AfterWorkerSpawn event
+        try:
+            from clawteam.events.global_bus import get_event_bus
+            from clawteam.events.types import AfterWorkerSpawn
+            get_event_bus().emit_async(AfterWorkerSpawn(
+                team_name=team_name,
+                agent_name=agent_name,
+                agent_id=agent_id,
+                backend="tmux",
+                target=target,
+            ))
+        except Exception:
+            pass
 
         return f"Agent '{agent_name}' spawned in tmux ({target})"
 

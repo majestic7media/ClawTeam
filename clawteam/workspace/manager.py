@@ -226,6 +226,14 @@ class WorkspaceManager:
             w for w in registry.workspaces if w.agent_name != agent_name
         ]
         _save_registry(registry)
+        try:
+            from clawteam.events.global_bus import get_event_bus
+            from clawteam.events.types import AfterWorkspaceCleanup
+            get_event_bus().emit_async(AfterWorkspaceCleanup(
+                team_name=team_name, agent_name=agent_name,
+            ))
+        except Exception:
+            pass
         return True
 
     def cleanup_team(self, team_name: str) -> int:
@@ -252,6 +260,14 @@ class WorkspaceManager:
         if info is None:
             return False, f"No workspace found for {agent_name}"
 
+        try:
+            from clawteam.events.global_bus import get_event_bus
+            from clawteam.events.types import BeforeWorkspaceMerge
+            get_event_bus().emit_async(BeforeWorkspaceMerge(
+                team_name=team_name, agent_name=agent_name, branch=info.branch_name,
+            ))
+        except Exception:
+            pass
         # Checkpoint before merge
         self.checkpoint(team_name, agent_name, f"[clawteam] pre-merge checkpoint: {agent_name}")
 
